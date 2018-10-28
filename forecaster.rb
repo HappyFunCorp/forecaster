@@ -402,6 +402,7 @@ class HarvestForecastReport < DataSyncer
               assignment[1],
               assignment[2],
               name,
+              assignment[7],
               role.first,
               tasks[role.first],
               assignment[4],
