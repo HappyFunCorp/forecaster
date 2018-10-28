@@ -4,6 +4,7 @@ GEM
     dotenv (2.5.0)
     faraday (0.15.3)
       multipart-post (>= 1.2, < 3)
+    json_pure (2.1.0)
     multipart-post (2.0.0)
 
 PLATFORMS
@@ -12,9 +13,10 @@ PLATFORMS
 DEPENDENCIES
   dotenv
   faraday
+  json_pure
 
 RUBY VERSION
    ruby 2.5.0p0
 
 BUNDLED WITH
-   1.16.1
+   1.17.1
