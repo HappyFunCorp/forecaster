@@ -345,15 +345,53 @@ class HarvestForecastReport < DataSyncer
 
           # Maybe they are called out specifically by their name
           if role.length > 1
-            role = tasks.keys.select { |x| x =~ /#{first_name}/ }
+            new_role = tasks.keys.select { |x| x =~ /#{first_name}/ }
+            role = new_role if new_role.length == 1
+          end
+
+          # Specific hacks
+          if role.length > 1
+            if first_name == 'Hannah'
+              role = ['Engineering (US)']
+            end
+
+            if first_name == 'Ravi'
+              role = ['Rails Engineering']
+            end
+
+            if first_name == 'Tales'
+              role = ['Android Engineering']
+            end
+
+            if first_name == 'Peter'
+              role = ['iOS Engineering']
+            end
+
+            if first_name == 'Patrick'
+              role = ['Engineering (US)']
+            end
+
+            if first_name == 'Fabio'
+              role = ['Engineering (international or local)']
+            end
+
+            if first_name == 'Puneet'
+              role = ['Back-end Engineering']
+            end
+
+            if first_name == 'Kristopher'
+              role = ['React Engineering']
+            end
+            
+            # Get rid of "Guiding Principals"
+            role = role.select { |x| !(x =~ /Guiding/)}
           end
 
           if role.length == 0
-            puts "#{assignment[2]}: #{name}: Looking for #{tag} in #{tasks.keys.join( ", ")}"
-            puts "Can't match #{assignment[5]} for tasks #{tasks.keys.join( ", ")} for tag #{assignment[6]}"
+            puts "No Match: #{assignment[2]}: #{name}: Looking for #{tag} in #{tasks.keys.join( ", ")}"
             puts
           elsif role.length > 1
-            puts "#{assignment[2]}: #{name}: Looking for #{tag} in #{tasks.keys.join( ", ")}"
+            puts "Multi match: #{assignment[2]}: #{name}: Looking for #{tag} in #{tasks.keys.join( ", ")}"
             puts "More than one tag matched #{role.join(", ")}"
             puts
           else
