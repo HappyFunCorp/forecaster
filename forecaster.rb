@@ -26,7 +26,7 @@ class DataSyncer
     return false
   end
 
-  def load_for_key key
+  def load_for_key key, dependants = []
     if needs_refresh? key
       yield key
     end
@@ -84,7 +84,7 @@ class Harvest < DataSyncer
   end
 
   def task_assignments
-    load_for_key 'task_assignments.csv' do |key|
+    load_for_key 'task_assignments.csv', [] do |key|
       task_assignments_to_csv( key )
     end
   end
@@ -240,28 +240,35 @@ class Forecast < DataSyncer
       end
     end
   end
+end
 
-  def link_harvest_ids_to_forecast
-    load_for_key( 'assignments_to_harvest_ids.csv') do |key|
-      link_harvest_ids_to_forecast_to_csv key
+class HarvestForecastReport < DataSyncer
+  def initialize
+    @harvest = Harvest.new
+    @forecast = Forecast.new
+  end
+
+  def assignments_to_harvest_ids
+    load_for_key( 'assignments_to_harvest_ids.csv', ['forecast_people', 'forecast_projects']) do |key|
+      assignments_to_harvest_ids_to_csv key
     end
   end
 
-  def link_harvest_ids_to_forecast_to_csv( key )
+  def assignments_to_harvest_ids_to_csv( key )
     people_by_id = {}
-    people.each do |person|
+    @forecast.people.each do |person|
       people_by_id[person[0]] = person
     end
 
     projects_by_id = {}
-    projects.each do |project|
+    @forecast.projects.each do |project|
       projects_by_id[project[0]] = project
     end
 
     CSV.open( datafile_for(key), "wb" ) do |out|
-      out << [:forecast_project_id, :harvest_project_id, :harvest_project_name, :havest_person_id, :hours, :name, :role ]
+      out << [:forecast_project_id, :harvest_project_id, :harvest_project_name, :harvest_person_id, :hours, :name, :role ]
 
-      assignments.each do |assignment|
+      @forecast.assignments.each do |assignment|
         project = projects_by_id[assignment[0]]
         person = people_by_id[assignment[1]]
         if !project || !person
@@ -274,16 +281,100 @@ class Forecast < DataSyncer
             project[2],
             person[1],
             assignment[2],
-            "#{person[2]} #{person[3]}",
+            person[2],
+            person[3],
             person[4]
           ]
         end
       end
     end
   end
+
+  def lookup_rates_by_task_and_role
+    load_for_key( 'rates_by_task.csv', [ 'task_assignments.csv', 'assignments_to_harvest_ids.csv'] ) do |key|
+      lookup_rates_by_task_and_role_csv( key )
+    end
+  end
+
+  def lookup_rates_by_task_and_role_csv( key )
+    project_task_rates = {}
+    @harvest.task_assignments.each do |task_assignment|
+      project_id = task_assignment[0]
+      task = task_assignment[3]
+      rate = task_assignment[4]
+
+      # puts "#{task_assignment[1]}: #{task} #{rate}"
+
+      project_task_rates[project_id] ||= {}
+      project_task_rates[project_id][task] = rate
+    end
+
+    CSV.open( datafile_for( key ), "wb" ) do |out|
+      out << [:project_id, :project_name, :person_name, :person_tag, :task, :task_rate, :hours, :subtotal]
+
+      assignments_to_harvest_ids.each do |assignment|
+        tasks = project_task_rates[assignment[1]]
+        tag = assignment[7]
+        first_name = assignment[5]
+        name = "#{assignment[5]} #{assignment[6]}"
+
+        if !tasks
+          puts "Couldn't find task rates for #{assignment[2]}"
+        else
+          if name == 'Aaron Brocken'
+            tag = 'Product'
+          end
+
+          role = tasks.keys.select { |x| x =~ /#{tag}/ }
+
+          if role.length == 0 && name == 'Leah Garber'
+            role = tasks.keys.select { |x| x=~ /QA/ }
+          end
+
+          if role.length == 0 && (tag == 'Production' || tag == 'Product')
+            role = tasks.keys.select { |x| x=~ /Project/ }
+          end
+
+          if role.length == 0 && (tag == 'Engineering')
+            role = tasks.keys.select { |x| x=~ /Development/ }
+          end
+
+          if role.length == 0 && (tag == 'Development')
+            role = tasks.keys.select { |x| x=~ /Engineering/ }
+          end
+
+          # Maybe they are called out specifically by their name
+          if role.length > 1
+            role = tasks.keys.select { |x| x =~ /#{first_name}/ }
+          end
+
+          if role.length == 0
+            puts "#{assignment[2]}: #{name}: Looking for #{tag} in #{tasks.keys.join( ", ")}"
+            puts "Can't match #{assignment[5]} for tasks #{tasks.keys.join( ", ")} for tag #{assignment[6]}"
+            puts
+          elsif role.length > 1
+            puts "#{assignment[2]}: #{name}: Looking for #{tag} in #{tasks.keys.join( ", ")}"
+            puts "More than one tag matched #{role.join(", ")}"
+            puts
+          else
+            out << [
+              assignment[1],
+              assignment[2],
+              name,
+              role.first,
+              tasks[role.first],
+              assignment[4],
+              tasks[role.first].to_i * assignment[4].to_i
+            ]
+          end
+        end
+      end
+    end
+  end
 end
 
-Forecast.new.link_harvest_ids_to_forecast
+# Forecast.new.link_harvest_ids_to_forecast
+HarvestForecastReport.new.lookup_rates_by_task_and_role
 
 #
 # f = Forecast.new
