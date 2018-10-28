@@ -22,6 +22,7 @@ class DataSyncer
   end
 
   def needs_refresh? key
+    return true if File.exists?( datafile_for( key ) ) && File.size( datafile_for(key)) < 100
     return true if !File.exists?( datafile_for( key ))
     return false
   end
@@ -129,16 +130,16 @@ class Harvest < DataSyncer
 end
 
 class Forecast < DataSyncer
-  def assignments( week = start_of_this_week )
-    key = "assignments_#{week}.csv"
+  def assignments(month)
+    key = "assignments_#{month}.csv"
 
     load_for_key( key ) do
-      assignments_to_csv week, key
+      assignments_to_csv key, month
     end
   end
 
-  def assignments_to_csv( week = start_of_this_week, key = "assignments_#{week}.csv" )
-    puts "Loading assignments for #{week} from forecast"
+  def assignments_to_csv( key, month)
+    puts "Loading assignments for month: #{month} from forecast"
 
     headers = {
       "Authorization" => "Bearer #{ENV['HARVEST_TOKEN']}",
@@ -146,8 +147,8 @@ class Forecast < DataSyncer
     }
 
     filter = {
-      start_date: week.strftime( "%Y-%m-%d" ),
-      end_date: (week + 7).strftime( "%Y-%m-%d"),
+      start_date: "2018-#{month-1}-25",
+      end_date: "2018-#{month}-24",
       state: "active"
     }
 
@@ -248,13 +249,14 @@ class HarvestForecastReport < DataSyncer
     @forecast = Forecast.new
   end
 
-  def assignments_to_harvest_ids
-    load_for_key( 'assignments_to_harvest_ids.csv', ['forecast_people', 'forecast_projects']) do |key|
-      assignments_to_harvest_ids_to_csv key
+  def assignments_to_harvest_ids( month )
+    key = "assignments_to_harvest_ids_#{month}.csv"
+    load_for_key( key, ['forecast_people', 'forecast_projects']) do |key|
+      assignments_to_harvest_ids_to_csv key, month
     end
   end
 
-  def assignments_to_harvest_ids_to_csv( key )
+  def assignments_to_harvest_ids_to_csv( key, month )
     people_by_id = {}
     @forecast.people.each do |person|
       people_by_id[person[0]] = person
@@ -268,7 +270,7 @@ class HarvestForecastReport < DataSyncer
     CSV.open( datafile_for(key), "wb" ) do |out|
       out << [:forecast_project_id, :harvest_project_id, :harvest_project_name, :harvest_person_id, :hours, :name, :role ]
 
-      @forecast.assignments.each do |assignment|
+      @forecast.assignments( month ).each do |assignment|
         project = projects_by_id[assignment[0]]
         person = people_by_id[assignment[1]]
         if !project || !person
@@ -290,13 +292,14 @@ class HarvestForecastReport < DataSyncer
     end
   end
 
-  def lookup_rates_by_task_and_role
-    load_for_key( 'rates_by_task.csv', [ 'task_assignments.csv', 'assignments_to_harvest_ids.csv'] ) do |key|
-      lookup_rates_by_task_and_role_csv( key )
+  def lookup_rates_by_task_and_role( month )
+    key = "rates_by_task_#{month}.csv"
+    load_for_key( key, [ 'task_assignments.csv', 'assignments_to_harvest_ids.csv'] ) do |key|
+      lookup_rates_by_task_and_role_csv( key, month )
     end
   end
 
-  def lookup_rates_by_task_and_role_csv( key )
+  def lookup_rates_by_task_and_role_csv( key, month )
     project_task_rates = {}
     @harvest.task_assignments.each do |task_assignment|
       project_id = task_assignment[0]
@@ -312,7 +315,7 @@ class HarvestForecastReport < DataSyncer
     CSV.open( datafile_for( key ), "wb" ) do |out|
       out << [:project_id, :project_name, :person_name, :person_tag, :task, :task_rate, :hours, :subtotal]
 
-      assignments_to_harvest_ids.each do |assignment|
+      assignments_to_harvest_ids( month ).each do |assignment|
         tasks = project_task_rates[assignment[1]]
         tag = assignment[7]
         first_name = assignment[5]
@@ -367,11 +370,11 @@ class HarvestForecastReport < DataSyncer
               role = ['iOS Engineering']
             end
 
-            if first_name == 'Patrick'
+            if (first_name == 'Patrick') || (first_name == 'Jeff')
               role = ['Engineering (US)']
             end
 
-            if first_name == 'Fabio'
+            if (first_name == 'Fabio') || (first_name == 'Tarun')
               role = ['Engineering (international or local)']
             end
 
@@ -382,7 +385,7 @@ class HarvestForecastReport < DataSyncer
             if first_name == 'Kristopher'
               role = ['React Engineering']
             end
-            
+
             # Get rid of "Guiding Principals"
             role = role.select { |x| !(x =~ /Guiding/)}
           end
@@ -412,38 +415,5 @@ class HarvestForecastReport < DataSyncer
 end
 
 # Forecast.new.link_harvest_ids_to_forecast
-HarvestForecastReport.new.lookup_rates_by_task_and_role
-
-#
-# f = Forecast.new
-# h = Harvest.new
-#
-# puts "#{f.people.length} people"
-# puts "#{f.projects.length} projects"
-# puts "#{f.assignments.length} project_assignments"
-# puts "#{h.user_assignments.length} user assignments"
-# puts "#{h.task_assignments.length} task assignents"
-
-
-#
-# if !File.exists? "data/forecast_people.csv"
-#   Forecast.new.people
-# end
-#
-# if !File.exists? "data/forecast_projects.csv"
-#   Forecast.new.projects
-# end
-
-#
-# if !File.exists? "data/assignments_#{start_of_this_week}.csv"
-#   Forecast.new.assignments
-# end
-#
-#
-# if !File.exists? "data/user_assignments.csv"
-#   Harvest.new.user_assignments
-# end
-#
-# if !File.exists? "data/task_assignments.csv"
-#   Harvest.new.task_assignments
-# end
+HarvestForecastReport.new.lookup_rates_by_task_and_role Date.today.month
+HarvestForecastReport.new.lookup_rates_by_task_and_role Date.today.month+1
