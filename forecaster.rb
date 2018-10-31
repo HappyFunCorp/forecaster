@@ -5,6 +5,8 @@ require 'dotenv/load'
 require 'date'
 require 'csv'
 require 'pp'
+# for older versions of ruby, e.g. 2.5.0, uncomment below
+# require 'fileutils'
 
 def start_of_this_week
   now = Date.today
