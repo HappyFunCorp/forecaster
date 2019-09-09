@@ -1,2 +1,7 @@
 /.env
 /data
+credentials.json
+token.yaml
+*~
+\#*
+.#*

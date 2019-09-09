@@ -1,0 +1,187 @@
+* Setup: Ruby
+
+Create a new directory and put the following in =Gemfile=:
+
+#+BEGIN_SRC ruby
+source 'https://rubygems.org'
+ruby '2.6.4'
+
+gem 'google-api-client'
+gem 'faraday'
+gem 'dotenv'
+gem 'json_pure'
+gem 'faker'
+#+END_SRC
+
+And run =bundle=.  The main thing here is =google-api-client=, if you need a different ruby that really shouldn't matter.
+
+* Setup: Google API access
+
+For easy start, use the [[https://developers.google.com/sheets/api/quickstart/ruby][Quickstart Guide]] to first Enable the Sheets API on your account, and then download the =credentials.json= to the same folder as your =Gemfile=.  This defines your application in Google's servers, and it will be what identifies your program.  We need this in order to get the user token which will actually interact with the sheets themselves.
+
+* Get the token
+
+We'll start with slightly rewriting the QuickStart code so that we can access things as a class.  We're also switching the =SCOPE= to be read-write instead of just read.
+
+#+BEGIN_SRC ruby
+require "google/apis/sheets_v4"
+require "googleauth"
+require "googleauth/stores/file_token_store"
+require "fileutils"
+require "faker"
+
+class GoogleSheets
+  OOB_URI = "urn:ietf:wg:oauth:2.0:oob".freeze
+  APPLICATION_NAME = "My Google Sheets Application".freeze
+  CREDENTIALS_PATH = "credentials.json".freeze
+  
+  # The file token.yaml stores the user's access and refresh tokens, and is
+  # created automatically when the authorization flow completes for the first
+  # time.
+  TOKEN_PATH = "token.yaml".freeze
+  SCOPE = Google::Apis::SheetsV4::AUTH_SPREADSHEETS
+
+  def initialize
+    # Initialize the API
+    @service = Google::Apis::SheetsV4::SheetsService.new
+    @service.client_options.application_name = APPLICATION_NAME
+    @service.authorization = authorize
+  end
+
+  def service
+    @service
+  end
+
+  ##
+  # Ensure valid credentials, either by restoring from the saved credentials
+  # files or intitiating an OAuth2 authorization. If authorization is required,
+  # the user's default browser will be launched to approve the request.
+  #
+  # @return [Google::Auth::UserRefreshCredentials] OAuth2 credentials
+  def authorize
+    client_id = Google::Auth::ClientId.from_file CREDENTIALS_PATH
+    token_store = Google::Auth::Stores::FileTokenStore.new file: TOKEN_PATH
+    authorizer = Google::Auth::UserAuthorizer.new client_id, SCOPE, token_store
+    user_id = "default"
+    credentials = authorizer.get_credentials user_id
+    if credentials.nil?
+      url = authorizer.get_authorization_url base_url: OOB_URI
+      puts "Open the following URL in the browser and enter the " \
+           "resulting code after authorization:\n" + url
+      code = gets
+      credentials = authorizer.get_and_store_credentials_from_code(
+        user_id: user_id, code: code, base_url: OOB_URI
+      )
+    end
+    credentials
+  end
+
+  def read_values( spreadsheet_id, range )
+    service.get_spreadsheet_values spreadsheet_id, range
+  end
+
+  def print_values( spreadsheet_id, range )
+    response = read_values spreadsheet_id, range
+    puts "No data found." if response.values.empty?
+    response.values.each do |row|
+      puts row.join( "\t" )
+    end
+  end
+end
+
+if __FILE__ == $0
+  spreadsheet_id = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
+  range = "Class Data!A2:E"
+
+  sheets = GoogleSheets.new
+  sheets.print_values spreadsheet_id, range
+end
+
+#+END_SRC
+
+Run this with =ruby sheets.rb= and it should prompt you with a URL.  Copy this into your browser and authenticate as yourself.  It will say that your app isn't verified (which is true) so click on the small link labeled =advanced= to get through this security hurdle.  The take the code and past it back into the CLI shell.
+
+Once this is done, you should see a table printed out on the screen, and a file named =token.yml= that will be used the next time you run the script to authenticate your requests.  Run the script again to verify that you don't need to authenticate a second time.
+
+* Creating and updating a spreadsheet
+
+Creating a spreadsheet can by done using the =create_spreadsheet= call, and we can also speciify the sheet names that are created in it.
+
+#+BEGIN_SRC ruby
+  def create_spreadsheet( name, sheets = ['Sheet1'] )
+    spreadsheet = {
+      properties: {
+        title: name
+      },
+      sheets: sheets.collect { |sheet| {properties: {title: sheet}} }
+    }
+    spreadsheet = service.create_spreadsheet(spreadsheet,
+                                             fields: 'spreadsheetId')
+    puts "Spreadsheet ID: #{spreadsheet.spreadsheet_id}"
+    spreadsheet.spreadsheet_id
+  end
+#+END_SRC
+
+To update value, we need to use the range specification, [[https://developers.google.com/sheets/api/guides/concepts#a1_notation][using A1 notation]].  We will pass in an array of arrays of values.
+
+#+BEGIN_SRC ruby
+  def update_values( spreadsheet_id, range, values )
+    data = [
+      {
+        range:  range,
+        values: values
+      }
+    ]
+    
+    value_range_object = Google::Apis::SheetsV4::ValueRange.new(range:  range,
+                                                                values: values)
+    result = service.update_spreadsheet_value(spreadsheet_id,
+                                              range,
+                                              value_range_object,
+                                              value_input_option: "USER_ENTERED" )
+    puts "#{result.updated_cells} cells updated."
+
+    result
+  end
+#+END_SRC
+
+To test this out, here's code that caches the spreadsheet id in a JSON file, generates some random names and replaces the values of one sheet.
+
+#+BEGIN_SRC ruby
+if __FILE__ == $0
+  sheets = GoogleSheets.new
+
+  conf = {}
+  if File.exists? "sheet.json"
+    conf = JSON.parse( File.read( "sheet.json" ) )
+  end
+
+  sheet = conf["sheet"]
+
+  if sheet.nil?
+    sheet = sheets.create_spreadsheet( "Roster", ["People", "Projects"] )
+    conf["sheet"] = sheet
+    File.open("sheet.json","w") do |f|
+      f.write(JSON.pretty_generate(conf))
+    end
+  end
+
+  values = [
+    [ 'ID', 'Name', 'Address' ]
+  ]
+
+  10.times do |id|
+    values << [id, Faker::Name.name, Faker::Address.city]
+  end
+  
+  sheets.update_values sheet, "People!A1:C", values
+
+  sheets.print_values sheet, "People!A1:C"
+end
+
+#+END_SRC
+
+If you run this multiple times, it we update the same sheet in place.  Open up the spreadsheet in a browser window to see it happen in real time!
+
+* References
+1. https://developers.google.com/sheets/api/quickstart/ruby
